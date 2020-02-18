@@ -39,6 +39,6 @@ public interface Performance {
      * @param bytes     number of bytes written or read
      * @param records   number of records written or read
      **/
-    void recordTime(long startTime, long endTime, int bytes, int records);
+    void recordTime(long startTime, long endTime, long bytes, long records);
 
 }

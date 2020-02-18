@@ -26,7 +26,7 @@ public class SystemResultLogger implements ResultLogger {
                 action, records, recsPerSec, mbPerSec, avgLatency, maxLatency);
     }
 
-    public void printLatencies(String action, int one, int two, int three, int four, int five, int six) {
+    public void printLatencies(String action, long one, long two, long three, long four, long five, long six) {
         System.out.printf("%s %d ms 50th, %d ms 75th, %d ms 95th, %d ms 99th, %d ms 99.9th, %d ms 99.99th.\n",
                  action, one, two, three, four, five, six);
     }

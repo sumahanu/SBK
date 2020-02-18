@@ -21,5 +21,5 @@ public interface QuadConsumer {
      * @param dataSize  size of the data in bytes.
      * @param records  number of records/events/messages.
      */
-    void accept(long startTime, long endTime, int dataSize, int records);
+    void accept(long startTime, long endTime, long dataSize, long records);
 }

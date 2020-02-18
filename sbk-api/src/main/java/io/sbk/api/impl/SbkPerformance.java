@@ -40,7 +40,7 @@ final public class SbkPerformance implements Performance {
     final private String csvFile;
     final private int messageSize;
     final private int windowInterval;
-    final private ConcurrentLinkedQueue<TimeStamp> queue;
+    final private ConcurrentLinkedQueue<long[]> queue;
     final private ResultLogger logger;
     final private ExecutorService executor;
 
@@ -62,31 +62,6 @@ final public class SbkPerformance implements Performance {
     /**
      * Private class for start and end time.
      */
-    final static private class TimeStamp {
-        final private long startTime;
-        final private long endTime;
-        final private int bytes;
-        final private int records;
-
-        private TimeStamp(long startTime, long endTime, int bytes, int records) {
-            this.startTime = startTime;
-            this.endTime = endTime;
-            this.bytes = bytes;
-            this.records = records;
-        }
-
-        private TimeStamp(long endTime) {
-            this(-1, endTime, 0, 0);
-        }
-
-        private boolean isEnd() {
-            return this.records == 0 && this.startTime == -1;
-        }
-    }
-
-    /**
-     * Private class for start and end time.
-     */
     final private class QueueProcessor implements Callable {
         final private long startTime;
 
@@ -99,29 +74,27 @@ final public class SbkPerformance implements Performance {
             final LatencyWriter latencyRecorder = csvFile == null ? new LatencyWriter(action, messageSize, startTime) :
                     new CSVLatencyWriter(action, messageSize, startTime, csvFile);
             boolean doWork = true;
-            long time = startTime;
-            TimeStamp t;
+            long[] data = new long[]{startTime, startTime, 0, 0};
 
             while (doWork) {
-                t = queue.poll();
-                if (t != null) {
-                    if (t.isEnd()) {
+                data = queue.poll();
+                if (data != null) {
+                    if (data[3] == 0) {
                         doWork = false;
                     } else {
-                        final int latency = (int) (t.endTime - t.startTime);
-                        window.record(t.bytes, t.records, latency);
-                        latencyRecorder.record(t.startTime, t.bytes, t.records, latency);
+                        final int latency = (int) (data[1] - data[0]);
+                        window.record(data[2], data[3], latency);
+                        latencyRecorder.record(data[0], data[2], data[3], latency);
                     }
-                    time =  t.endTime;
-                    if (window.windowTimeMS(time) > windowInterval) {
-                        window.print(time, logger);
-                        window.reset(time);
+                    if (window.windowTimeMS(data[1]) > windowInterval) {
+                        window.print(data[1], logger);
+                        window.reset(data[1]);
                     }
                 } else {
                         window.busyWaitPrint(logger);
                 }
             }
-            latencyRecorder.printTotal(time, logger);
+            latencyRecorder.printTotal(data[1], logger);
             return null;
         }
     }
@@ -211,8 +184,8 @@ final public class SbkPerformance implements Performance {
          * @param bytes   number of bytes.
          * @param latency latency in ms.
          */
-        private void record(long bytes, int records, int latency) {
-            this.count += records;
+        private void record(long bytes, long events, int latency) {
+            this.count += events;
             this.totalLatency += latency;
             this.bytes += bytes;
             this.maxLatency = Math.max(this.maxLatency, latency);
@@ -265,19 +238,19 @@ final public class SbkPerformance implements Performance {
         final String action;
         final int messageSize;
         final long startTime;
-        final int[] latencies;
+        final long[] latencies;
         int discard;
         long count;
         long totalLatency;
         long maxLatency;
         long totalBytes;
-        ArrayList<int[]> latencyRanges;
+        ArrayList<long[]> latencyRanges;
 
         LatencyWriter(String action, int messageSize, long startTime) {
             this.action = action;
             this.messageSize = messageSize;
             this.startTime = startTime;
-            this.latencies = new int[MS_PER_HR];
+            this.latencies = new long[MS_PER_HR];
             this.discard = 0;
             this.latencyRanges = null;
             this.totalLatency = 0;
@@ -288,9 +261,10 @@ final public class SbkPerformance implements Performance {
         private void countLatencies() {
             count = 0;
             latencyRanges = new ArrayList<>();
-            for (int i = 0, cur = 0; i < latencies.length; i++) {
+            long cur = 0;
+            for (int i = 0; i < latencies.length; i++) {
                 if (latencies[i] > 0) {
-                    latencyRanges.add(new int[]{cur, cur + latencies[i], i});
+                    latencyRanges.add(new long[]{cur, cur + latencies[i], i});
                     cur += latencies[i] + 1;
                     totalLatency += i * latencies[i];
                     count += latencies[i];
@@ -299,16 +273,16 @@ final public class SbkPerformance implements Performance {
             }
         }
 
-        private int[] getPercentiles() {
-            int[] percentileIds = new int[percentiles.length];
-            int[] values = new int[percentileIds.length];
+        private long[] getPercentiles() {
+            long[] percentileIds = new long[percentiles.length];
+            long[] values = new long[percentileIds.length];
             int index = 0;
 
             for (int i = 0; i < percentiles.length; i++) {
                 percentileIds[i] = (int) (count * percentiles[i]);
             }
 
-            for (int[] lr : latencyRanges) {
+            for (long[] lr : latencyRanges) {
                 while ((index < percentileIds.length) &&
                         (lr[0] <= percentileIds[index]) && (percentileIds[index] <= lr[1])) {
                     values[index++] = lr[2];
@@ -317,7 +291,7 @@ final public class SbkPerformance implements Performance {
             return values;
         }
 
-        public void record(int bytes, int events, int latency) {
+        public void record(long bytes, long events, int latency) {
             if (latency  < latencies.length && latency > -1) {
                 totalBytes += bytes;
                 latencies[latency] += events;
@@ -326,7 +300,7 @@ final public class SbkPerformance implements Performance {
             }
         }
 
-        public void record(long start, int bytes, int events, int latency) {
+        public void record(long start, long bytes, long events, int latency) {
             this.record(bytes, events, latency);
         }
 
@@ -335,7 +309,7 @@ final public class SbkPerformance implements Performance {
             final double elapsed = (endTime - startTime) / 1000.0;
             final double recsPerSec = count / elapsed;
             final double mbPerSec = (this.totalBytes / (1024.0 * 1024.0)) / elapsed;
-            int[] percs = getPercentiles();
+            long[] percs = getPercentiles();
 
             logger.print(action+" (Total) ", count, recsPerSec, mbPerSec, totalLatency / (double) count, maxLatency);
             logger.printLatencies(action +" Latencies", percs[0], percs[1], percs[2], percs[3], percs[4], percs[5]);
@@ -370,9 +344,9 @@ final public class SbkPerformance implements Performance {
         }
 
         @Override
-        public void record(long start, int bytes, int events, int latency) {
+        public void record(long start, long bytes, long records, int latency) {
             try {
-                csvPrinter.printRecord(start, bytes, events, latency);
+                csvPrinter.printRecord(start, bytes, records, latency);
             } catch (IOException ex) {
                 throw new RuntimeException(ex);
             }
@@ -402,7 +376,7 @@ final public class SbkPerformance implements Performance {
     @Synchronized
     public void shutdown(long endTime) throws ExecutionException, InterruptedException {
         if (this.ret != null) {
-            queue.add(new TimeStamp(endTime));
+            queue.add(new long[]{-1, endTime, 0, 0});
             ret.get();
             queue.clear();
             this.ret = null;
@@ -410,7 +384,7 @@ final public class SbkPerformance implements Performance {
     }
 
     @Override
-    public void recordTime(long startTime, long endTime, int bytes, int records) {
-        queue.add(new TimeStamp(startTime, endTime, bytes, records));
+    public void recordTime(long startTime, long endTime, long bytes, long records) {
+        queue.add(new long[]{startTime, endTime, bytes, records});
     }
 }

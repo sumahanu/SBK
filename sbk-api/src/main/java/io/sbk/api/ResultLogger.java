@@ -35,7 +35,7 @@ public interface ResultLogger {
      * @param five 99.9th Percentile
      * @param six  99.99th Percentile
      */
-    void printLatencies(String action, int one, int two, int three, int four, int five, int six);
+    void printLatencies(String action, long one, long two, long three, long four, long five, long six);
 
     /**
      * Print the number of discarded latency values .

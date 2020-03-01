@@ -118,7 +118,7 @@ When you run the SBK, by default it starts the http server and all the output be
 
 The sample output of Standalone Pulsar benchmark data with grafana is below
 
-![Pulsar Benchmark grafana graphs](https://github.com/kmgowda/SBK/blob/gh-pages/examples/pictures/pulsar-grafana.jpg)
+[[Pulsar Benchmark grafana graphs](https://github.com/kmgowda/SBK/blob/gh-pages/examples/pictures/pulsar-grafana.jpg)]
 
 
 #### Port conflicts between strage servers and grafana/prometheus

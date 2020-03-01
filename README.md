@@ -391,7 +391,7 @@ usage: sbk -class Pulsar
 
 ## Design of SBK
 
-[![SBK System Diagram](https://github.com/kmgowda/SBK/blob/gh-pages/examples/pictures/SBK-system-diagram.png)](https://github.com/kmgowda/SBK/blob/gh-pages/examples/pictures/SBK-system-diagram.png)
+[![SBK System Diagram](https://github.com/kmgowda/SBK/blob/gh-pages/examples/pictures/SBK-system-diagram.PNG)](https://github.com/kmgowda/SBK/blob/gh-pages/examples/pictures/SBK-system-diagram.PNG)
 
 The internal components are detailed in the above system diagram of SBK. 
 

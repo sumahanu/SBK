@@ -8,6 +8,7 @@
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
 package io.sbk.RabbitMQ;
+import io.sbk.api.QuadConsumer;
 import io.sbk.api.Writer;
 import io.sbk.api.Parameters;
 
@@ -36,20 +37,23 @@ public class RabbitMQWriter implements Writer<byte[]> {
     final private Channel channel;
     final private String topicName;
     final private  ConfirmListener listener;
-    final private ConcurrentHashMap<Long, CompletableFuture<Void>> futureConcurrentHashMap;
+    final private ConcurrentHashMap<Long, Long> startTimeConcurrentHashMap;
     final private boolean isPersist;
+    final private int size;
     private  volatile SortedSet<Long> ackSet;
+    private QuadConsumer record;
 
     public RabbitMQWriter(int writerID, Parameters params,
                           Connection connection, String topicName, boolean isPersist ) throws IOException {
         this.key = String.valueOf(writerID);
         this.isPersist = isPersist;
         this.topicName = topicName;
+        this.size = params.getRecordSize();
         channel = connection.createChannel();
         channel.exchangeDeclare(topicName, BuiltinExchangeType.FANOUT);
         channel.confirmSelect();
         ackSet = Collections.synchronizedSortedSet(new TreeSet<Long>());
-        futureConcurrentHashMap = new ConcurrentHashMap<>();
+        startTimeConcurrentHashMap = new ConcurrentHashMap<>();
         this.listener = new ConfirmListener() {
 
             @Override
@@ -60,21 +64,21 @@ public class RabbitMQWriter implements Writer<byte[]> {
                         for (Iterator iterator = treeHeadSet.iterator(); iterator.hasNext();) {
                             long value = (long) iterator.next();
                             iterator.remove();
-                            CompletableFuture<Void> future = futureConcurrentHashMap.get(value);
-                            if (future != null) {
-                                future.completeExceptionally(null);
-                                futureConcurrentHashMap.remove(value);
+                            Long startTime = startTimeConcurrentHashMap.get(value);
+                            if (startTime != null && record != null) {
+                                    record.accept(startTime, System.currentTimeMillis(), size, 1);
                             }
+                            startTimeConcurrentHashMap.remove(value);
                         }
                         treeHeadSet.clear();
                     }
 
                 } else {
-                    CompletableFuture<Void> future = futureConcurrentHashMap.get(deliveryTag);
-                    if (future != null) {
-                        future.completeExceptionally(null);
-                        futureConcurrentHashMap.remove(deliveryTag);
+                    Long startTime  = startTimeConcurrentHashMap.get(deliveryTag);
+                    if (startTime != null && record != null) {
+                        record.accept(startTime, System.currentTimeMillis(), size, 1);
                     }
+                    startTimeConcurrentHashMap.remove(deliveryTag);
                     ackSet.remove(deliveryTag);
                 }
             }
@@ -85,20 +89,20 @@ public class RabbitMQWriter implements Writer<byte[]> {
                     SortedSet<Long> treeHeadSet = ackSet.headSet(deliveryTag + 1);
                     synchronized (ackSet) {
                         for (long value : treeHeadSet) {
-                            CompletableFuture<Void> future = futureConcurrentHashMap.get(value);
-                            if (future != null) {
-                                future.complete(null);
-                                futureConcurrentHashMap.remove(value);
+                            Long startTime = startTimeConcurrentHashMap.get(value);
+                            if (startTime != null && record != null) {
+                                record.accept(startTime, System.currentTimeMillis(), size, 1);
                             }
+                            startTimeConcurrentHashMap.remove(value);
                         }
                         treeHeadSet.clear();
                     }
                 } else {
-                    CompletableFuture<Void> future = futureConcurrentHashMap.get(deliveryTag);
-                    if (future != null) {
-                        future.complete(null);
-                        futureConcurrentHashMap.remove(deliveryTag);
+                    Long startTime  = startTimeConcurrentHashMap.get(deliveryTag);
+                    if (startTime != null && record != null) {
+                        record.accept(startTime, System.currentTimeMillis(), size, 1);
                     }
+                    startTimeConcurrentHashMap.remove(deliveryTag);
                     ackSet.remove(deliveryTag);
                 }
 
@@ -106,7 +110,26 @@ public class RabbitMQWriter implements Writer<byte[]> {
         };
 
         channel.addConfirmListener(listener);
+        record = null;
     }
+
+    @Override
+    public long recordWrite(byte[] data, int size, QuadConsumer record) {
+        final long time = System.currentTimeMillis();
+        if (this.record == null) {
+            this.record = record;
+        }
+        long msgId = channel.getNextPublishSeqNo();
+        ackSet.add(msgId);
+        startTimeConcurrentHashMap.putIfAbsent(msgId, time);
+        try {
+            writeAsync(data);
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+        return time;
+    }
+
 
     @Override
     public CompletableFuture writeAsync(byte[] data) throws IOException {
@@ -115,16 +138,8 @@ public class RabbitMQWriter implements Writer<byte[]> {
             builder.deliveryMode(2);
         }
         BasicProperties props = builder.build();
-        CompletableFuture<Void> future = new CompletableFuture<>();
-        long msgId = channel.getNextPublishSeqNo();
-        ackSet.add(msgId);
-        futureConcurrentHashMap.putIfAbsent(msgId, future);
-        try {
-            channel.basicPublish(topicName, key, props, data);
-        } catch (Exception e) {
-            future.completeExceptionally(e);
-        }
-        return future;
+        channel.basicPublish(topicName, key, props, data);
+        return null;
     }
 
 
